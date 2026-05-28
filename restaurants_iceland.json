@@ -1,0 +1,42 @@
+[
+  {
+    "name": "Reykjavik Food Hall",
+    "lat": 64.1475,
+    "lon": -21.933
+  },
+  {
+    "name": "Vik Local Restaurant",
+    "lat": 63.419,
+    "lon": -19.005
+  },
+  {
+    "name": "Akureyri Diner",
+    "lat": 65.69,
+    "lon": -18.12
+  },
+  {
+    "name": "Hofn Seafood House",
+    "lat": 64.25,
+    "lon": -15.21
+  },
+  {
+    "name": "Egilsstadir Cafe",
+    "lat": 65.265,
+    "lon": -14.39
+  },
+  {
+    "name": "Geysir Restaurant",
+    "lat": 64.309,
+    "lon": -20.301
+  },
+  {
+    "name": "Gullfoss Cafe",
+    "lat": 64.326,
+    "lon": -20.12
+  },
+  {
+    "name": "Myvatn Bistro",
+    "lat": 65.604,
+    "lon": -16.996
+  }
+]
