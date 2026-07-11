@@ -143,4 +143,7 @@ The player wins by visiting all checkpoints. The player loses if:
 
 ## Credits
 
-Designed by Nuoya Wu and Qinwei Zhu as a Pygame course practice project.
+This is a collaborative Pygame course practice project by Qinwei Zhu and Nuoya Wu.
+
+- Qinwei Zhu: gameplay implementation, project cleanup, documentation, and GitHub preparation.
+- Nuoya Wu: project collaboration, game concept support, and presentation preparation.
