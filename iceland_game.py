@@ -4,6 +4,7 @@ import csv
 import json
 import os
 import random
+import glob
 from datetime import datetime
 
 # =========================
@@ -32,9 +33,18 @@ GRAY = (120, 120, 120)
 DARK_GRAY = (50, 50, 50)
 ICE = (190, 230, 240)
 
-FONT = pygame.font.SysFont("arial", 18)
-BIG_FONT = pygame.font.SysFont("arial", 30, bold=True)
-TITLE_FONT = pygame.font.SysFont("arial", 42, bold=True)
+def make_font(size, bold=False):
+    try:
+        return pygame.font.SysFont("arial", size, bold=bold)
+    except (TypeError, OSError, pygame.error):
+        font = pygame.font.Font(None, size)
+        font.set_bold(bold)
+        return font
+
+
+FONT = make_font(18)
+BIG_FONT = make_font(30, bold=True)
+TITLE_FONT = make_font(42, bold=True)
 
 # Iceland bounding box for simple map projection
 LAT_MIN, LAT_MAX = 63.0, 66.8
@@ -383,14 +393,22 @@ def draw_help_box():
 def show_checkpoint_popup(name):
     popup_running = True
 
-    photo_path_jpg = os.path.join(PHOTO_FOLDER, f"{name}.jpg")
-    photo_path_png = os.path.join(PHOTO_FOLDER, f"{name}.png")
-
     image = None
-    if os.path.exists(photo_path_jpg):
-        image = pygame.image.load(photo_path_jpg)
-    elif os.path.exists(photo_path_png):
-        image = pygame.image.load(photo_path_png)
+    photo_patterns = [
+        os.path.join(PHOTO_FOLDER, f"{name}*.jpg"),
+        os.path.join(PHOTO_FOLDER, f"{name}*.png"),
+        os.path.join(PHOTO_FOLDER, f"{name}*.jpeg"),
+    ]
+
+    photo_files = []
+    for pattern in photo_patterns:
+        photo_files.extend(glob.glob(pattern))
+
+    if photo_files:
+        try:
+            image = pygame.image.load(photo_files[0])
+        except pygame.error:
+            image = None
 
     if image:
         image = pygame.transform.scale(image, (520, 320))

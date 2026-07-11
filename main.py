@@ -26,25 +26,44 @@ RESTAURANT_FILE = BASE_DIR / "restaurants_iceland.json"
 GAS_FILE = BASE_DIR / "gas_stations_iceland.json"
 MAP_IMAGE_FILE = BASE_DIR / "assets" / "iceland_map.png"
 PHOTO_FOLDER = BASE_DIR / "assets" / "photos"
+TITLE_IMAGE_FILE = BASE_DIR / "assets" / "ui" / "iceland_driving_exploration_title.png"
 
-# Colors
-WHITE = (245, 245, 245)
-BLACK = (20, 20, 20)
-BLUE = (80, 150, 220)
-DARK_BLUE = (20, 40, 70)
-GREEN = (90, 190, 120)
-RED = (230, 70, 70)
+# Icelandic future-minimal palette
+WHITE = (245, 249, 250)
+BLACK = (12, 16, 18)
+GLACIER_WHITE = (239, 247, 249)
+POLAR_GRAY = (177, 193, 198)
+LAVA_BLACK = (12, 18, 22)
+AURORA_CYAN = (78, 238, 220)
+GLACIER_BLUE = (85, 169, 230)
+TUNDRA_GREEN = (111, 172, 132)
+WARNING_RED = (245, 88, 96)
 YELLOW = (250, 210, 80)
 ORANGE = (240, 150, 60)
-GRAY = (130, 130, 130)
-DARK_GRAY = (55, 55, 55)
+BLUE = GLACIER_BLUE
+DARK_BLUE = (15, 34, 45)
+GREEN = TUNDRA_GREEN
+RED = WARNING_RED
+GRAY = POLAR_GRAY
+DARK_GRAY = (55, 65, 68)
 ICE = (190, 230, 240)
 SNOW_COLOR = (250, 250, 255)
+GLASS = (225, 242, 246, 178)
+GLASS_DARK = (15, 27, 34, 190)
 
-FONT = pygame.font.SysFont("arial", 18)
-SMALL_FONT = pygame.font.SysFont("arial", 14)
-BIG_FONT = pygame.font.SysFont("arial", 30, bold=True)
-TITLE_FONT = pygame.font.SysFont("arial", 48, bold=True)
+def make_font(size, bold=False):
+    try:
+        return pygame.font.SysFont("arial", size, bold=bold)
+    except (TypeError, OSError, pygame.error):
+        font = pygame.font.Font(None, size)
+        font.set_bold(bold)
+        return font
+
+
+FONT = make_font(18)
+SMALL_FONT = make_font(14)
+BIG_FONT = make_font(30, bold=True)
+TITLE_FONT = make_font(48, bold=True)
 
 # Iceland bounding box
 LAT_MIN, LAT_MAX = 63.0, 66.8
@@ -54,7 +73,7 @@ LON_MIN, LON_MAX = -24.8, -13.0
 FOLLOW_CAMERA = True
 
 # 地图放大倍数，越大越近
-CAMERA_ZOOM = 2.4
+CAMERA_ZOOM = 2.15
 
 # UI 顶部高度，避免地图盖住状态栏
 UI_TOP_HEIGHT = 76
@@ -62,8 +81,8 @@ UI_TOP_HEIGHT = 76
 # Make in-game time pass faster
 TIME_SPEED_MULTIPLIER = 2.2
 
-# Make displayed speed look slower/more realistic
-SPEED_DISPLAY_FACTOR = 0.55
+# Make displayed speed readable while keeping physical steering gentle
+SPEED_DISPLAY_FACTOR = 0.82
 CURRENT_CAMERA = None
 
 # =========================
@@ -129,6 +148,30 @@ def geo_to_minimap(lat, lon, rect):
 def screen_distance(a, b):
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
 
+def point_in_polygon(point, polygon):
+    """
+    Ray casting algorithm.
+    Return True if point is inside polygon.
+    """
+    x, y = point
+    inside = False
+
+    j = len(polygon) - 1
+
+    for i in range(len(polygon)):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+
+        intersects = ((yi > y) != (yj > y)) and (
+            x < (xj - xi) * (y - yi) / ((yj - yi) + 0.000001) + xi
+        )
+
+        if intersects:
+            inside = not inside
+
+        j = i
+
+    return inside
 
 def point_to_segment_distance(p, a, b):
     px, py = p
@@ -146,6 +189,37 @@ def point_to_segment_distance(p, a, b):
 
     nearest = (ax + t * dx, ay + t * dy)
     return screen_distance(p, nearest)
+
+
+def is_land_position(x, y, margin=8):
+    samples = [
+        (x, y),
+        (x - margin, y),
+        (x + margin, y),
+        (x, y - margin),
+        (x, y + margin),
+    ]
+
+    return all(point_in_polygon(sample, ICELAND_LAND_POLYGON) for sample in samples)
+
+
+def route_points_to_screen(route, camera=None):
+    points = []
+    for lat, lon in route["points"]:
+        if FOLLOW_CAMERA and camera is not None:
+            points.append(geo_to_view(lat, lon, camera))
+        else:
+            points.append(geo_to_screen(lat, lon))
+    return points
+
+
+def iter_route_segments():
+    for route in ROUTE_NETWORK:
+        points = [geo_to_screen(lat, lon) for lat, lon in route["points"]]
+        for i in range(len(points) - 1):
+            yield route, points[i], points[i + 1]
+        if route.get("closed") and len(points) > 2:
+            yield route, points[-1], points[0]
 
 
 # =========================
@@ -173,7 +247,97 @@ HOME = {
     "lat": 64.1466,
     "lon": -21.9426
 }
+# =========================
+# Iceland Land Boundary
+# =========================
+# A simplified playable land polygon.
+# The player is not allowed to drive outside this boundary.
 
+ICELAND_LAND_POLYGON_GEO = [
+    (66.45, -24.05),
+    (66.55, -22.70),
+    (66.42, -21.15),
+    (66.30, -19.35),
+    (66.18, -17.35),
+    (65.85, -14.55),
+    (65.20, -13.55),
+    (64.55, -13.70),
+    (63.98, -14.35),
+    (63.55, -16.20),
+    (63.30, -18.15),
+    (63.35, -20.30),
+    (63.62, -21.75),
+    (64.05, -22.75),
+    (64.70, -24.00),
+    (65.35, -24.55),
+    (65.95, -24.35),
+]
+
+ICELAND_LAND_POLYGON = [
+    geo_to_screen(lat, lon) for lat, lon in ICELAND_LAND_POLYGON_GEO
+]
+
+ROUTE_NETWORK = [
+    {
+        "name": "Ring Road",
+        "kind": "main",
+        "closed": True,
+        "color": (86, 103, 106),
+        "points": [(cp["lat"], cp["lon"]) for cp in CHECKPOINTS],
+    },
+    {
+        "name": "Kjolur Highland Route",
+        "kind": "highland",
+        "closed": False,
+        "color": (92, 142, 128),
+        "points": [
+            (64.3271, -20.1199),
+            (64.58, -19.70),
+            (64.86, -19.45),
+            (65.12, -19.36),
+            (65.43, -19.10),
+            (65.6885, -18.1262),
+        ],
+    },
+    {
+        "name": "Sprengisandur Highland Route",
+        "kind": "highland",
+        "closed": False,
+        "color": (80, 133, 154),
+        "points": [
+            (64.2559, -21.1295),
+            (64.55, -20.15),
+            (64.95, -19.12),
+            (65.25, -18.25),
+            (65.6039, -16.9961),
+        ],
+    },
+    {
+        "name": "Landmannalaugar Spur",
+        "kind": "scenic",
+        "closed": False,
+        "color": (111, 172, 132),
+        "points": [
+            (63.6156, -19.9886),
+            (63.88, -19.35),
+            (64.02, -19.05),
+            (64.08, -18.65),
+            (63.5321, -19.5114),
+        ],
+    },
+    {
+        "name": "Snaefellsnes Coastal Road",
+        "kind": "scenic",
+        "closed": False,
+        "color": (85, 169, 230),
+        "points": [
+            (64.1466, -21.9426),
+            (64.45, -22.30),
+            (64.74, -22.84),
+            (64.9417, -23.3069),
+        ],
+    },
+]
 
 # =========================
 # Fixed Mountains
@@ -313,6 +477,29 @@ def load_map_background():
     return None
 
 
+def load_title_logo():
+    if not TITLE_IMAGE_FILE.exists():
+        return None
+
+    try:
+        logo = pygame.image.load(str(TITLE_IMAGE_FILE)).convert_alpha()
+        for y in range(logo.get_height()):
+            for x in range(logo.get_width()):
+                r, g, b, a = logo.get_at((x, y))
+                if r > 232 and g > 232 and b > 232:
+                    logo.set_at((x, y), (r, g, b, 0))
+        max_w = 820
+        scale = min(max_w / logo.get_width(), 1.0)
+        return pygame.transform.smoothscale(
+            logo,
+            (int(logo.get_width() * scale), int(logo.get_height() * scale))
+        )
+    except Exception as e:
+        print("Title image could not be loaded.")
+        print(e)
+        return None
+
+
 # =========================
 # Animation Classes
 # =========================
@@ -365,15 +552,18 @@ class Player:
         self.speed = 0
         self.angle = 90
 
-        self.base_max_speed = 6.2
+        self.base_max_speed = 5.35
         self.max_speed = self.base_max_speed
-        self.acceleration = 0.13
-        self.friction = 0.045
+        self.acceleration = 0.075
+        self.brake_force = 0.105
+        self.friction = 0.055
+        self.turn_rate = 1.75
 
         self.money = 1000
         self.life = 5
         self.fuel = 100
         self.score = 0
+        self.stability = 100
 
         self.has_eaten_today = False
         self.day = 1
@@ -384,6 +574,15 @@ class Player:
 
         self.camera_cooldown = {}
         self.route_score_cooldown = 0
+        self.total_refuel_cost = 0
+        self.total_lodging_cost = 0
+        self.total_fine_cost = 0
+        self.fine_count = 0
+        self.refuel_count = 0
+        self.lodging_count = 0
+        self.total_distance = 0.0
+        self.last_violation = None
+        self.violation_timer = 0
 
     def update(self, keys, weather):
         if weather == "blizzard":
@@ -395,36 +594,54 @@ class Player:
 
         if self.fuel <= 0:
             self.speed = 0
-            self.show_message("Out of fuel! Find a gas station.")
+            self.stability = max(0, self.stability - 0.02)
+            self.show_message("Out of fuel. Refuel now if you are at a gas station.")
             return
 
         if keys[pygame.K_UP]:
             self.speed += self.acceleration
         elif keys[pygame.K_DOWN]:
-            self.speed -= self.acceleration
+            self.speed -= self.brake_force
         else:
             if self.speed > 0:
-                self.speed -= self.friction
+                self.speed = max(0, self.speed - self.friction)
             elif self.speed < 0:
-                self.speed += self.friction
+                self.speed = min(0, self.speed + self.friction)
 
-        self.speed = max(-2.5, min(self.speed, self.max_speed))
+        self.speed = max(-1.35, min(self.speed, self.max_speed))
 
+        speed_ratio = min(1.0, abs(self.speed) / max(0.1, self.max_speed))
+        steering = self.turn_rate * (1.0 - speed_ratio * 0.32)
         if keys[pygame.K_LEFT]:
-            self.angle -= 3
+            self.angle -= steering
         if keys[pygame.K_RIGHT]:
-            self.angle += 3
+            self.angle += steering
+
+        # Save previous legal position
+        old_x, old_y = self.x, self.y
 
         rad = math.radians(self.angle)
-        self.x += math.cos(rad) * self.speed
-        self.y += math.sin(rad) * self.speed
+        dx = math.cos(rad) * self.speed
+        dy = math.sin(rad) * self.speed
+        self.x += dx
+        self.y += dy
+        self.total_distance += math.sqrt(dx * dx + dy * dy)
 
+        # Basic screen boundary
         self.x = max(0, min(WIDTH, self.x))
         self.y = max(75, min(HEIGHT, self.y))
 
+        # Land boundary: prevent the car body from entering the ocean.
+        if not is_land_position(self.x, self.y, 9):
+            self.x, self.y = old_x, old_y
+            self.speed *= -0.18
+            self.stability = max(0, self.stability - 0.4)
+            self.show_message("Ocean boundary: stay on Iceland's land roads.")
+
         # Faster fuel consumption: higher speed burns much more fuel
-        self.fuel -= 0.035 + abs(self.speed) * 0.045
+        self.fuel -= 0.018 + abs(self.speed) * 0.027
         self.fuel = max(0, self.fuel)
+        self.stability = max(0, self.stability - abs(self.speed) * 0.0012)
 
         # Time passes according to driving speed.
         # Faster driving means more distance covered, so game time advances faster.
@@ -460,6 +677,8 @@ class Player:
 
         if self.route_score_cooldown > 0:
             self.route_score_cooldown -= 1
+        if self.violation_timer > 0:
+            self.violation_timer -= 1
 
     def show_message(self, text):
         self.message = text
@@ -475,6 +694,12 @@ class Player:
 
     def current_speed_kmh(self):
         return int(abs(self.speed) * 25 * SPEED_DISPLAY_FACTOR)
+
+    def total_km(self):
+        return int(self.total_distance * 1.7)
+
+    def total_spend(self):
+        return self.total_refuel_cost + self.total_lodging_cost + self.total_fine_cost
 
 
 # =========================
@@ -581,24 +806,31 @@ def draw_day_night_overlay(player):
 
 
 def draw_ring_road(camera=None):
-    points = []
+    for route in ROUTE_NETWORK:
+        points = route_points_to_screen(route, camera)
+        if len(points) < 2:
+            continue
 
-    for p in CHECKPOINTS:
-        if FOLLOW_CAMERA and camera is not None:
-            points.append(geo_to_view(p["lat"], p["lon"], camera))
-        else:
-            points.append(geo_to_screen(p["lat"], p["lon"]))
+        closed = route.get("closed", False)
+        is_highland = route["kind"] == "highland"
+        outer_width = 15 if route["kind"] == "main" else 10
+        inner_width = 7 if route["kind"] == "main" else 4
 
-    if len(points) > 2:
-        pygame.draw.lines(SCREEN, DARK_GRAY, True, points, 14 if FOLLOW_CAMERA else 8)
-        pygame.draw.lines(SCREEN, GRAY, True, points, 6 if FOLLOW_CAMERA else 3)
+        if FOLLOW_CAMERA:
+            outer_width = int(outer_width * 1.05)
+            inner_width = int(inner_width * 1.05)
+
+        pygame.draw.lines(SCREEN, LAVA_BLACK, closed, points, outer_width)
+        pygame.draw.lines(SCREEN, route["color"], closed, points, inner_width)
 
         # dashed center line
         for i in range(len(points)):
+            if not closed and i == len(points) - 1:
+                continue
             a = points[i]
             b = points[(i + 1) % len(points)]
 
-            steps = 12
+            steps = 10 if is_highland else 12
             for j in range(steps):
                 if j % 2 == 0:
                     t1 = j / steps
@@ -609,7 +841,8 @@ def draw_ring_road(camera=None):
                     x2 = a[0] + (b[0] - a[0]) * t2
                     y2 = a[1] + (b[1] - a[1]) * t2
 
-                    pygame.draw.line(SCREEN, WHITE, (x1, y1), (x2, y2), 2)
+                    dash_color = AURORA_CYAN if is_highland else WHITE
+                    pygame.draw.line(SCREEN, dash_color, (x1, y1), (x2, y2), 2)
 
 
 def draw_checkpoints(camera=None):
@@ -622,12 +855,17 @@ def draw_checkpoints(camera=None):
         if x < -80 or x > WIDTH + 80 or y < UI_TOP_HEIGHT - 80 or y > HEIGHT + 80:
             continue
 
-        color = GREEN if cp["visited"] else ORANGE
+        color = AURORA_CYAN if cp["visited"] else POLAR_GRAY
 
-        pygame.draw.rect(SCREEN, color, (x - 12, y - 12, 24, 24))
-        pygame.draw.rect(SCREEN, BLACK, (x - 12, y - 12, 24, 24), 3)
+        pygame.draw.circle(SCREEN, (10, 18, 22), (x, y), 17)
+        pygame.draw.circle(SCREEN, color, (x, y), 13)
+        pygame.draw.circle(SCREEN, GLACIER_WHITE, (x, y), 5)
 
-        label = FONT.render(cp["name"], True, BLACK)
+        label = SMALL_FONT.render(cp["name"], True, GLACIER_WHITE)
+        bg = pygame.Rect(x + 15, y - 12, label.get_width() + 12, 22)
+        panel = pygame.Surface((bg.width, bg.height), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (8, 16, 20, 150), panel.get_rect(), border_radius=5)
+        SCREEN.blit(panel, bg.topleft)
         SCREEN.blit(label, (x + 16, y - 10))
 
 
@@ -641,8 +879,8 @@ def draw_restaurants(restaurants, camera=None):
         if x < -60 or x > WIDTH + 60 or y < UI_TOP_HEIGHT - 60 or y > HEIGHT + 60:
             continue
 
-        pygame.draw.rect(SCREEN, (255, 220, 90), (x - 14, y - 14, 28, 28), border_radius=4)
-        pygame.draw.rect(SCREEN, BLACK, (x - 14, y - 14, 28, 28), 2, border_radius=4)
+        pygame.draw.rect(SCREEN, (226, 245, 238), (x - 14, y - 14, 28, 28), border_radius=4)
+        pygame.draw.rect(SCREEN, TUNDRA_GREEN, (x - 14, y - 14, 28, 28), 2, border_radius=4)
 
         pygame.draw.circle(SCREEN, WHITE, (x, y + 2), 7)
         pygame.draw.circle(SCREEN, BLACK, (x, y + 2), 7, 1)
@@ -664,8 +902,8 @@ def draw_gas_stations(gas_stations, camera=None):
         if x < -60 or x > WIDTH + 60 or y < UI_TOP_HEIGHT - 60 or y > HEIGHT + 60:
             continue
 
-        pygame.draw.rect(SCREEN, (40, 120, 220), (x - 12, y - 16, 22, 32), border_radius=3)
-        pygame.draw.rect(SCREEN, BLACK, (x - 12, y - 16, 22, 32), 2, border_radius=3)
+        pygame.draw.rect(SCREEN, GLACIER_BLUE, (x - 12, y - 16, 22, 32), border_radius=3)
+        pygame.draw.rect(SCREEN, AURORA_CYAN, (x - 12, y - 16, 22, 32), 2, border_radius=3)
 
         pygame.draw.rect(SCREEN, WHITE, (x - 7, y - 11, 12, 8))
         pygame.draw.rect(SCREEN, BLACK, (x - 7, y - 11, 12, 8), 1)
@@ -687,8 +925,8 @@ def draw_speed_cameras(cameras, camera=None):
         if x < -60 or x > WIDTH + 60 or y < UI_TOP_HEIGHT - 60 or y > HEIGHT + 60:
             continue
 
-        pygame.draw.rect(SCREEN, BLACK, (x - 8, y - 8, 16, 16))
-        pygame.draw.rect(SCREEN, WHITE, (x - 4, y - 4, 8, 8))
+        pygame.draw.rect(SCREEN, LAVA_BLACK, (x - 8, y - 8, 16, 16), border_radius=3)
+        pygame.draw.rect(SCREEN, WARNING_RED, (x - 4, y - 4, 8, 8), border_radius=2)
 
 
 def draw_car(player):
@@ -756,43 +994,98 @@ def draw_car(player):
 # UI Drawing
 # =========================
 
+def draw_soft_shadow(rect, radius=8, alpha=75, offset=(0, 8)):
+    shadow = pygame.Surface((rect.width + 18, rect.height + 18), pygame.SRCALPHA)
+    pygame.draw.rect(
+        shadow,
+        (0, 8, 14, alpha),
+        (9 + offset[0], 9 + offset[1], rect.width, rect.height),
+        border_radius=radius
+    )
+    SCREEN.blit(shadow, (rect.x - 9, rect.y - 9))
+
+
+def draw_glass_panel(rect, fill=GLASS_DARK, border=AURORA_CYAN, radius=8, glow=True):
+    draw_soft_shadow(rect, radius)
+    panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+    pygame.draw.rect(panel, fill, panel.get_rect(), border_radius=radius)
+    pygame.draw.rect(panel, (255, 255, 255, 45), panel.get_rect(), 1, border_radius=radius)
+    SCREEN.blit(panel, rect.topleft)
+    if glow:
+        pygame.draw.rect(SCREEN, border, rect, 2, border_radius=radius)
+
+
+def draw_progress_bar(rect, value, max_value, color, bg=(42, 55, 60), label=None):
+    pygame.draw.rect(SCREEN, bg, rect, border_radius=5)
+    ratio = 0 if max_value <= 0 else max(0, min(1, value / max_value))
+    fill = pygame.Rect(rect.x, rect.y, int(rect.width * ratio), rect.height)
+    if fill.width > 0:
+        pygame.draw.rect(SCREEN, color, fill, border_radius=5)
+    pygame.draw.rect(SCREEN, (218, 245, 248), rect, 1, border_radius=5)
+    if label:
+        text = SMALL_FONT.render(label, True, WHITE)
+        SCREEN.blit(text, (rect.x + 8, rect.y + rect.height // 2 - text.get_height() // 2))
+
+
+def draw_metric_card(rect, label, value, color=AURORA_CYAN):
+    draw_glass_panel(rect, (18, 31, 38, 178), color, 7, True)
+    label_surf = SMALL_FONT.render(label.upper(), True, POLAR_GRAY)
+    value_surf = FONT.render(value, True, WHITE)
+    SCREEN.blit(label_surf, (rect.x + 12, rect.y + 8))
+    SCREEN.blit(value_surf, (rect.x + 12, rect.y + 29))
+
+
 def draw_top_ui(player, weather):
-    pygame.draw.rect(SCREEN, DARK_BLUE, (0, 0, WIDTH, 76))
-    pygame.draw.rect(SCREEN, BLACK, (0, 0, WIDTH, 76), 3)
+    bar = pygame.Rect(0, 0, WIDTH, UI_TOP_HEIGHT)
+    pygame.draw.rect(SCREEN, (9, 18, 24), bar)
+    pygame.draw.line(SCREEN, AURORA_CYAN, (0, UI_TOP_HEIGHT - 2), (WIDTH, UI_TOP_HEIGHT - 2), 2)
 
-    texts = [
-        f"Time: {player.current_time_text()}",
-        f"Money: €{player.money}",
-        f"Life: {player.life}",
-        f"Fuel: {int(player.fuel)}%",
-        f"Score: {player.score}",
-        f"Weather: {weather.upper()}",
-    ]
+    draw_metric_card(pygame.Rect(14, 10, 132, 54), "Funds", f"€{player.money}", AURORA_CYAN if player.money >= 180 else WARNING_RED)
+    draw_metric_card(pygame.Rect(158, 10, 122, 54), "Day", player.current_time_text(), GLACIER_BLUE)
+    draw_metric_card(pygame.Rect(292, 10, 106, 54), "Life", f"{player.life}/5", TUNDRA_GREEN)
+    draw_metric_card(pygame.Rect(410, 10, 110, 54), "Score", str(player.score), AURORA_CYAN)
+    draw_metric_card(pygame.Rect(532, 10, 128, 54), "Weather", weather.upper(), GLACIER_BLUE)
 
-    x = 15
-    for t in texts:
-        surf = FONT.render(t, True, WHITE)
-        SCREEN.blit(surf, (x, 16))
-        x += 185
+    fuel_rect = pygame.Rect(684, 18, 210, 18)
+    draw_progress_bar(
+        fuel_rect,
+        player.fuel,
+        100,
+        AURORA_CYAN if player.fuel > 25 else WARNING_RED,
+        label=f"Fuel {int(player.fuel)}%"
+    )
+    stability_rect = pygame.Rect(684, 44, 210, 14)
+    draw_progress_bar(
+        stability_rect,
+        player.stability,
+        100,
+        TUNDRA_GREEN if player.stability > 45 else WARNING_RED,
+        label=f"Stability {int(player.stability)}%"
+    )
 
     visited = sum(1 for cp in CHECKPOINTS if cp["visited"])
-    progress = FONT.render(f"Checkpoints: {visited}/{len(CHECKPOINTS)}", True, WHITE)
-    SCREEN.blit(progress, (15, 46))
-
-    meal = FONT.render(f"Eaten Today: {'Yes' if player.has_eaten_today else 'No'}", True, WHITE)
-    SCREEN.blit(meal, (230, 46))
+    progress_rect = pygame.Rect(918, 18, 164, 18)
+    draw_progress_bar(progress_rect, visited, len(CHECKPOINTS), GLACIER_BLUE, label=f"Checkpoints {visited}/{len(CHECKPOINTS)}")
 
     if player.message_timer > 0:
-        msg = FONT.render(player.message, True, YELLOW)
-        SCREEN.blit(msg, (470, 46))
+        msg = SMALL_FONT.render(player.message, True, (236, 252, 252))
+        SCREEN.blit(msg, (918, 44))
+
+    for i, icon in enumerate(["!", "⚙", "?"]):
+        center = (1128 + i * 24, 27)
+        pygame.draw.circle(SCREEN, (23, 42, 50), center, 10)
+        pygame.draw.circle(SCREEN, AURORA_CYAN, center, 10, 1)
+        txt = SMALL_FONT.render(icon, True, WHITE)
+        SCREEN.blit(txt, (center[0] - txt.get_width() // 2, center[1] - txt.get_height() // 2))
 
 
 def draw_speedometer(player):
     center = (WIDTH - 105, HEIGHT - 105)
     radius = 72
 
-    pygame.draw.circle(SCREEN, WHITE, center, radius)
-    pygame.draw.circle(SCREEN, BLACK, center, radius, 4)
+    pygame.draw.circle(SCREEN, (17, 28, 34), center, radius)
+    pygame.draw.circle(SCREEN, AURORA_CYAN, center, radius, 3)
+    pygame.draw.circle(SCREEN, (230, 248, 250), center, radius - 16, 1)
 
     speed = player.current_speed_kmh()
     max_display = 180
@@ -801,37 +1094,36 @@ def draw_speedometer(player):
     end_x = center[0] + math.cos(angle) * 52
     end_y = center[1] + math.sin(angle) * 52
 
-    pygame.draw.line(SCREEN, RED, center, (end_x, end_y), 5)
-    pygame.draw.circle(SCREEN, BLACK, center, 6)
+    pygame.draw.line(SCREEN, WARNING_RED if speed > 85 else AURORA_CYAN, center, (end_x, end_y), 5)
+    pygame.draw.circle(SCREEN, GLACIER_WHITE, center, 6)
 
-    txt = BIG_FONT.render(str(speed), True, BLACK)
+    txt = BIG_FONT.render(str(speed), True, WHITE)
     SCREEN.blit(txt, (center[0] - txt.get_width() // 2, center[1] + 12))
 
-    unit = SMALL_FONT.render("km/h", True, BLACK)
+    unit = SMALL_FONT.render("km/h", True, POLAR_GRAY)
     SCREEN.blit(unit, (center[0] - unit.get_width() // 2, center[1] + 42))
 
 
 def draw_task_list(player):
     panel = pygame.Rect(15, 95, 310, 245)
-    pygame.draw.rect(SCREEN, WHITE, panel)
-    pygame.draw.rect(SCREEN, BLACK, panel, 3)
+    draw_glass_panel(panel, (226, 242, 246, 188), GLACIER_BLUE, 8)
 
-    title = BIG_FONT.render("Tasks", True, BLACK)
+    title = BIG_FONT.render("Ring Road Tasks", True, LAVA_BLACK)
     SCREEN.blit(title, (30, 105))
 
     tasks = [
         ("Visit all checkpoints", all(cp["visited"] for cp in CHECKPOINTS)),
         ("Eat at least once per day", player.has_eaten_today),
-        ("Return home before 02:00", True),
+        ("Rest overnight or return home", True),
         ("Avoid speeding fines", True),
         ("Refuel before fuel runs out", player.fuel > 20),
-        ("Follow Ring Road for bonus", True),
+        ("Keep vehicle stability", player.stability > 35),
     ]
 
     y = 150
     for text, done in tasks:
-        mark = "[x]" if done else "[ ]"
-        color = GREEN if done else BLACK
+        mark = "✓" if done else "•"
+        color = TUNDRA_GREEN if done else LAVA_BLACK
         line = FONT.render(f"{mark} {text}", True, color)
         SCREEN.blit(line, (30, y))
         y += 30
@@ -839,40 +1131,41 @@ def draw_task_list(player):
 
 def draw_help_box():
     box = pygame.Rect(15, HEIGHT - 105, 500, 90)
-    pygame.draw.rect(SCREEN, WHITE, box)
-    pygame.draw.rect(SCREEN, BLACK, box, 3)
+    draw_glass_panel(box, (18, 31, 38, 175), AURORA_CYAN, 8)
 
     lines = [
         "Arrow Keys: Drive / Turn",
-        "E near Restaurant: Eat     F near Gas Station: Refuel",
-        "ESC: Quit     T: Show / Hide Task List",
-        "Drive near Ring Road to earn route bonus"
+        "E near Restaurant: Eat     F near Gas Station: Refuel €40",
+        "H: Rest & Accommodate €100     R: Overnight Risk Mode",
+        "Highland roads give extra route score; ocean boundary blocks the car",
     ]
 
     for i, line in enumerate(lines):
-        txt = FONT.render(line, True, BLACK)
+        txt = SMALL_FONT.render(line, True, WHITE)
         SCREEN.blit(txt, (30, HEIGHT - 95 + i * 20))
 
 
 def draw_minimap(player):
     rect = pygame.Rect(WIDTH - 245, 95, 220, 150)
-    pygame.draw.rect(SCREEN, (230, 245, 250), rect)
-    pygame.draw.rect(SCREEN, BLACK, rect, 3)
+    draw_glass_panel(rect, (225, 242, 246, 188), AURORA_CYAN, 8)
 
-    title = SMALL_FONT.render("Minimap", True, BLACK)
+    title = SMALL_FONT.render("Iceland Route", True, LAVA_BLACK)
     SCREEN.blit(title, (rect.x + 8, rect.y + 5))
 
-    road_points = [geo_to_minimap(p["lat"], p["lon"], rect) for p in CHECKPOINTS]
-    pygame.draw.lines(SCREEN, GRAY, True, road_points, 2)
+    for route in ROUTE_NETWORK:
+        road_points = [geo_to_minimap(lat, lon, rect) for lat, lon in route["points"]]
+        if len(road_points) > 1:
+            width = 2 if route["kind"] == "main" else 1
+            pygame.draw.lines(SCREEN, route["color"], route.get("closed", False), road_points, width)
 
     for cp in CHECKPOINTS:
         x, y = geo_to_minimap(cp["lat"], cp["lon"], rect)
-        color = GREEN if cp["visited"] else ORANGE
+        color = AURORA_CYAN if cp["visited"] else POLAR_GRAY
         pygame.draw.circle(SCREEN, color, (x, y), 3)
 
     px = rect.x + int(player.x / WIDTH * rect.width)
     py = rect.y + int(player.y / HEIGHT * rect.height)
-    pygame.draw.circle(SCREEN, RED, (px, py), 5)
+    pygame.draw.circle(SCREEN, WARNING_RED, (px, py), 5)
 
 
 def draw_floating_texts(floating_texts):
@@ -921,10 +1214,12 @@ def draw_weather_effect(weather, snow_particles):
 
 def draw_popup_base(title):
     box = pygame.Rect(250, 120, 700, 500)
-    pygame.draw.rect(SCREEN, WHITE, box)
-    pygame.draw.rect(SCREEN, BLACK, box, 5)
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((3, 10, 14, 112))
+    SCREEN.blit(overlay, (0, 0))
+    draw_glass_panel(box, (231, 245, 248, 232), AURORA_CYAN, 8)
 
-    t = BIG_FONT.render(title, True, BLACK)
+    t = BIG_FONT.render(title, True, LAVA_BLACK)
     SCREEN.blit(t, (box.x + 35, box.y + 25))
     return box
 
@@ -953,16 +1248,16 @@ def restaurant_popup(restaurant, player):
 
         draw_popup_base("Restaurant")
 
-        name = BIG_FONT.render(restaurant["name"], True, BLACK)
+        name = BIG_FONT.render(restaurant["name"], True, LAVA_BLACK)
         SCREEN.blit(name, (300, 210))
 
-        desc = FONT.render("A warm meal helps you survive the Iceland road trip.", True, BLACK)
+        desc = FONT.render("A warm meal helps you survive the Iceland road trip.", True, LAVA_BLACK)
         SCREEN.blit(desc, (300, 265))
 
         price = FONT.render("Meal Price: €45", True, DARK_GRAY)
         SCREEN.blit(price, (300, 305))
 
-        hint = FONT.render("Press Y to eat / N to leave", True, RED)
+        hint = FONT.render("Y Eat / N Leave", True, WARNING_RED)
         SCREEN.blit(hint, (300, 380))
 
         pygame.display.flip()
@@ -980,10 +1275,12 @@ def gas_popup(gas_station, player):
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_y:
-                    cost = int((100 - player.fuel) * 1.6)
+                    cost = 40
                     if player.money >= cost:
                         player.money -= cost
                         player.fuel = 100
+                        player.total_refuel_cost += cost
+                        player.refuel_count += 1
                         player.show_message(f"Refueled at {gas_station['name']}! -€{cost}")
                     else:
                         player.show_message("Not enough money to refuel.")
@@ -994,15 +1291,84 @@ def gas_popup(gas_station, player):
 
         draw_popup_base("Gas Station")
 
-        name = BIG_FONT.render(gas_station["name"], True, BLACK)
+        name = BIG_FONT.render(gas_station["name"], True, LAVA_BLACK)
         SCREEN.blit(name, (300, 210))
 
-        cost = int((100 - player.fuel) * 1.2)
-        info = FONT.render(f"Current fuel: {int(player.fuel)}%    Refuel cost: €{cost}", True, BLACK)
+        cost = 40
+        info = FONT.render(f"Current fuel: {int(player.fuel)}%    Fixed refuel cost: €{cost}", True, LAVA_BLACK)
         SCREEN.blit(info, (300, 270))
 
-        hint = FONT.render("Press Y to refuel / N to leave", True, RED)
+        hint = FONT.render("Y Refuel / N Leave", True, WARNING_RED)
         SCREEN.blit(hint, (300, 360))
+
+        pygame.display.flip()
+        CLOCK.tick(FPS)
+
+
+def rest_accommodate(player):
+    cost = 100
+    if player.money < cost:
+        player.show_message("Not enough money for accommodation.")
+        return
+
+    player.money -= cost
+    player.total_lodging_cost += cost
+    player.lodging_count += 1
+    player.day += 1
+    player.game_minutes = 8 * 60
+    player.has_eaten_today = False
+    player.stability = min(100, player.stability + 18)
+    player.speed = 0
+    player.show_message("Rested overnight. New day started. -€100")
+
+
+def overnight_risk_mode(player):
+    player.day += 1
+    player.game_minutes = 8 * 60
+    player.has_eaten_today = False
+    player.life -= 1
+    player.stability = max(0, player.stability - 24)
+    player.speed = 0
+    player.show_message("Overnight drive risk taken. -1 life, vehicle stability reduced.")
+
+
+def lodging_popup(player):
+    running = True
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                raise SystemExit
+
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_y:
+                    rest_accommodate(player)
+                    running = False
+
+                if event.key == pygame.K_r:
+                    overnight_risk_mode(player)
+                    running = False
+
+                if event.key in [pygame.K_n, pygame.K_ESCAPE]:
+                    running = False
+
+        box = draw_popup_base("End-of-Day Travel Choice")
+        summary = [
+            "Rest & Accommodate: fixed €100, starts the next day at 08:00.",
+            "Overnight Drive (Risk Mode): no lodging cost, but loses 1 life and stability.",
+            f"Remaining funds: €{player.money}",
+            f"Vehicle stability: {int(player.stability)}%"
+        ]
+        y = box.y + 110
+        for line in summary:
+            color = WARNING_RED if player.money < 100 and "Remaining" in line else LAVA_BLACK
+            txt = FONT.render(line, True, color)
+            SCREEN.blit(txt, (box.x + 55, y))
+            y += 42
+
+        hint = FONT.render("Y Rest & Accommodate / R Overnight Risk / N Cancel", True, WARNING_RED)
+        SCREEN.blit(hint, (box.x + 55, box.y + 385))
 
         pygame.display.flip()
         CLOCK.tick(FPS)
@@ -1133,61 +1499,66 @@ def checkpoint_photo_carousel(cp, player):
 class Puffin:
     def __init__(self):
         self.x = random.randint(-200, WIDTH)
-        self.y = random.randint(80, 320)
-        self.speed = random.uniform(1.2, 2.8)
-        self.size = random.randint(14, 22)
+        self.y = random.randint(105, 350)
+        self.speed = random.uniform(1.8, 3.6)
+        self.size = random.randint(16, 26)
         self.phase = random.uniform(0, math.pi * 2)
+        self.tilt = random.uniform(-0.18, 0.18)
 
     def update(self):
         self.x += self.speed
-        self.y += math.sin(pygame.time.get_ticks() * 0.004 + self.phase) * 0.35
+        self.y += math.sin(pygame.time.get_ticks() * 0.0048 + self.phase) * 0.62
 
         if self.x > WIDTH + 120:
             self.x = random.randint(-260, -80)
-            self.y = random.randint(80, 320)
-            self.speed = random.uniform(1.2, 2.8)
+            self.y = random.randint(105, 350)
+            self.speed = random.uniform(1.8, 3.6)
+            self.tilt = random.uniform(-0.18, 0.18)
 
     def draw(self, surface):
-        wing_offset = math.sin(pygame.time.get_ticks() * 0.018 + self.phase) * self.size * 0.45
-
+        wing = math.sin(pygame.time.get_ticks() * 0.024 + self.phase)
         x, y, s = self.x, self.y, self.size
+
+        trail = pygame.Surface((int(s * 3), int(s * 1.4)), pygame.SRCALPHA)
+        pygame.draw.ellipse(trail, (100, 235, 222, 38), (0, s * 0.45, s * 2.5, s * 0.34))
+        surface.blit(trail, (x - s * 2.3, y - s * 0.28))
 
         # wings
         pygame.draw.polygon(
             surface,
-            (25, 25, 30),
+            (11, 16, 19),
             [
-                (x - s * 0.2, y),
-                (x - s * 1.3, y - wing_offset),
-                (x - s * 0.4, y + s * 0.35)
+                (x - s * 0.15, y),
+                (x - s * 1.45, y - wing * s * 0.72),
+                (x - s * 0.42, y + s * 0.42)
             ]
         )
 
         pygame.draw.polygon(
             surface,
-            (25, 25, 30),
+            (20, 27, 30),
             [
-                (x + s * 0.2, y),
-                (x + s * 1.3, y + wing_offset),
-                (x + s * 0.4, y + s * 0.35)
+                (x + s * 0.18, y),
+                (x + s * 1.2, y + wing * s * 0.46),
+                (x + s * 0.42, y + s * 0.36)
             ]
         )
 
         # body
-        pygame.draw.ellipse(surface, (20, 20, 25), (x - s * 0.55, y - s * 0.45, s * 1.1, s * 1.2))
-        pygame.draw.ellipse(surface, WHITE, (x - s * 0.35, y - s * 0.2, s * 0.7, s * 0.75))
+        pygame.draw.ellipse(surface, (10, 14, 17), (x - s * 0.58, y - s * 0.43, s * 1.16, s * 1.14))
+        pygame.draw.ellipse(surface, GLACIER_WHITE, (x - s * 0.34, y - s * 0.16, s * 0.72, s * 0.72))
 
         # head
-        pygame.draw.circle(surface, (18, 18, 22), (int(x + s * 0.35), int(y - s * 0.45)), int(s * 0.38))
-        pygame.draw.circle(surface, WHITE, (int(x + s * 0.45), int(y - s * 0.50)), int(s * 0.18))
+        pygame.draw.circle(surface, (10, 14, 17), (int(x + s * 0.36), int(y - s * 0.43)), int(s * 0.38))
+        pygame.draw.circle(surface, GLACIER_WHITE, (int(x + s * 0.47), int(y - s * 0.48)), int(s * 0.17))
 
         # beak
         pygame.draw.polygon(
             surface,
-            ORANGE,
+            (255, 125, 62),
             [
                 (x + s * 0.68, y - s * 0.45),
-                (x + s * 1.05, y - s * 0.35),
+                (x + s * 1.13, y - s * 0.34),
                 (x + s * 0.68, y - s * 0.25)
             ]
         )
@@ -1204,34 +1575,46 @@ def draw_pixel_rect(surface, color, rect, border_color=BLACK, border=4):
 def draw_sky_gradient(surface):
     for y in range(HEIGHT):
         t = y / HEIGHT
-        r = int(28 + 65 * t)
-        g = int(78 + 110 * t)
-        b = int(145 + 85 * t)
+        r = int(10 + 125 * t)
+        g = int(32 + 158 * t)
+        b = int(45 + 172 * t)
         pygame.draw.line(surface, (r, g, b), (0, y), (WIDTH, y))
 
 
 def draw_pixel_sun(surface):
     t = pygame.time.get_ticks() * 0.001
-    sun_x = WIDTH - 150
-    sun_y = 105 + math.sin(t) * 6
+    sun_x = WIDTH - 158
+    sun_y = 115 + math.sin(t) * 6
 
-    pygame.draw.circle(surface, (255, 232, 120), (int(sun_x), int(sun_y)), 38)
-    pygame.draw.circle(surface, (255, 245, 170), (int(sun_x), int(sun_y)), 24)
+    for radius, alpha in [(76, 28), (52, 38), (32, 75)]:
+        glow = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+        pygame.draw.circle(glow, (180, 242, 248, alpha), (radius, radius), radius)
+        surface.blit(glow, (sun_x - radius, sun_y - radius))
+    pygame.draw.circle(surface, (226, 248, 250), (int(sun_x), int(sun_y)), 24)
 
 
 def draw_dynamic_mountains(surface):
     t = pygame.time.get_ticks() * 0.001
+    aurora = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    for i in range(4):
+        points = []
+        for x in range(-60, WIDTH + 80, 60):
+            y = 115 + i * 24 + math.sin(x * 0.012 + t * (0.8 + i * 0.2)) * (24 + i * 7)
+            points.append((x, y))
+        pygame.draw.lines(aurora, (60, 235, 210, 46 - i * 7), False, points, 18 - i * 3)
+    surface.blit(aurora, (0, 0))
 
-    # far blue mountains
+    # far glacier mountains
     far = [
-        (0, 420), (120, 250), (240, 420),
-        (360, 240), (540, 420),
-        (700, 260), (880, 420),
-        (1040, 250), (1200, 420)
+        (0, 430), (120, 250), (240, 430),
+        (360, 238), (540, 430),
+        (700, 260), (880, 430),
+        (1040, 246), (1200, 430)
     ]
-    pygame.draw.polygon(surface, (70, 115, 135), far)
+    pygame.draw.polygon(surface, (120, 153, 164), far)
+    pygame.draw.lines(surface, (225, 246, 248), False, far, 3)
 
-    # matcha volcano / grass hills
+    # lava-black volcanoes with glacier caps
     volcanoes = [
         {"x": 220, "base": 600, "w": 340, "h": 300, "crater": 48},
         {"x": 600, "base": 610, "w": 430, "h": 360, "crater": 60},
@@ -1251,34 +1634,40 @@ def draw_dynamic_mountains(surface):
         # mountain body
         pygame.draw.polygon(
             surface,
-            (125, 185, 105),
+            (35, 49, 50),
             [(left, base), (x - 55, top + 45), (x, top), (x + 55, top + 45), (right, base)]
         )
 
         # highlight side
         pygame.draw.polygon(
             surface,
-            (160, 215, 130),
+            (92, 124, 128),
             [(left + 40, base), (x, top + 8), (x - 20, base)]
         )
 
         # shadow side
         pygame.draw.polygon(
             surface,
-            (85, 145, 90),
+            (13, 20, 21),
             [(x + 15, top + 20), (right - 40, base), (x - 10, base)]
+        )
+
+        pygame.draw.polygon(
+            surface,
+            GLACIER_WHITE,
+            [(x - 55, top + 46), (x, top), (x + 55, top + 46), (x + 24, top + 36), (x, top + 18), (x - 25, top + 40)]
         )
 
         # crater
         crater_y = top + 38 + math.sin(t + i) * 3
         pygame.draw.ellipse(
             surface,
-            (80, 80, 75),
+            (10, 14, 15),
             (x - v["crater"], crater_y, v["crater"] * 2, 24)
         )
         pygame.draw.ellipse(
             surface,
-            (120, 165, 100),
+            (76, 122, 118),
             (x - v["crater"] + 8, crater_y + 4, v["crater"] * 2 - 16, 12)
         )
 
@@ -1289,76 +1678,63 @@ def draw_dynamic_mountains(surface):
             alpha_size = 18 + j * 4
             pygame.draw.circle(
                 surface,
-                (235, 245, 240),
+                (216, 239, 238),
                 (int(smoke_x), int(smoke_y)),
                 alpha_size
             )
 
-    # foreground grass
-    pygame.draw.rect(surface, (82, 160, 85), (0, 600, WIDTH, 160))
-    pygame.draw.rect(surface, (105, 190, 95), (0, 600, WIDTH, 20))
+    # black sand foreground and Ring Road
+    pygame.draw.rect(surface, (18, 24, 25), (0, 600, WIDTH, 160))
+    pygame.draw.rect(surface, (90, 128, 118), (0, 600, WIDTH, 20))
+    road = [(0, 742), (260, 672), (545, 695), (850, 642), (1200, 674)]
+    pygame.draw.lines(surface, (7, 10, 11), False, road, 58)
+    pygame.draw.lines(surface, (74, 87, 89), False, road, 7)
 
-    # small grass pixels
     for i in range(90):
         gx = (i * 37) % WIDTH
         gy = 620 + (i * 19) % 110
-        pygame.draw.line(surface, (65, 135, 70), (gx, gy), (gx + 4, gy - 8), 2)
+        color = TUNDRA_GREEN if i % 3 == 0 else (63, 91, 83)
+        pygame.draw.line(surface, color, (gx, gy), (gx + 4, gy - 8), 2)
 
 
-def draw_wooden_title(surface):
-    sign = pygame.Rect(WIDTH // 2 - 390, 80, 780, 160)
+def draw_wooden_title(surface, title_logo=None):
+    if title_logo:
+        logo_rect = title_logo.get_rect(center=(WIDTH // 2, 145))
+        glow = pygame.Surface((logo_rect.width + 80, logo_rect.height + 60), pygame.SRCALPHA)
+        pygame.draw.ellipse(glow, (67, 232, 218, 48), glow.get_rect())
+        surface.blit(glow, (logo_rect.x - 40, logo_rect.y - 22))
+        surface.blit(title_logo, logo_rect)
+        return
 
-    # sign shadow
-    pygame.draw.rect(surface, (85, 50, 30), sign.move(8, 8), border_radius=18)
-
-    # sign body
-    pygame.draw.rect(surface, (205, 135, 75), sign, border_radius=18)
-    pygame.draw.rect(surface, (110, 65, 35), sign, 6, border_radius=18)
-
-    # inner panel
-    inner = pygame.Rect(sign.x + 20, sign.y + 20, sign.width - 40, sign.height - 40)
-    pygame.draw.rect(surface, (245, 190, 115), inner, border_radius=12)
-    pygame.draw.rect(surface, (135, 80, 40), inner, 4, border_radius=12)
-
-    # wood grain
-    for i in range(9):
-        y = sign.y + 35 + i * 13
-        pygame.draw.line(surface, (175, 105, 55), (sign.x + 35, y), (sign.x + sign.width - 35, y), 2)
-
-    title = TITLE_FONT.render("Iceland Ring Road", True, (95, 55, 35))
-    title2 = BIG_FONT.render("Challenge", True, (95, 55, 35))
-
-    surface.blit(title, (WIDTH // 2 - title.get_width() // 2, sign.y + 42))
-    surface.blit(title2, (WIDTH // 2 - title2.get_width() // 2, sign.y + 100))
+    panel = pygame.Rect(WIDTH // 2 - 310, 76, 620, 148)
+    draw_soft_shadow(panel, 8, 90)
+    pygame.draw.rect(surface, (229, 245, 248, 190), panel, border_radius=8)
+    pygame.draw.rect(surface, AURORA_CYAN, panel, 2, border_radius=8)
+    title = TITLE_FONT.render("Iceland Driving", True, LAVA_BLACK)
+    title2 = BIG_FONT.render("Exploration", True, GLACIER_BLUE)
+    surface.blit(title, (WIDTH // 2 - title.get_width() // 2, panel.y + 34))
+    surface.blit(title2, (WIDTH // 2 - title2.get_width() // 2, panel.y + 92))
 
 
 def draw_menu_button(surface, text, rect, selected=False):
-    shadow = rect.move(5, 5)
-    pygame.draw.rect(surface, (85, 55, 40), shadow, border_radius=8)
+    draw_soft_shadow(rect, 8, 72)
+    color = (232, 248, 250, 214) if selected else (20, 34, 42, 188)
+    border = AURORA_CYAN if selected else (117, 151, 158)
+    panel = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+    pygame.draw.rect(panel, color, panel.get_rect(), border_radius=8)
+    surface.blit(panel, rect.topleft)
+    pygame.draw.rect(surface, border, rect, 2, border_radius=8)
+    pygame.draw.line(surface, (255, 255, 255, 88), (rect.x + 12, rect.y + 10), (rect.right - 12, rect.y + 10), 1)
 
-    color = (250, 205, 125) if selected else (230, 170, 100)
-    border = (110, 70, 45)
+    pygame.draw.circle(surface, border, (rect.x + 30, rect.centery), 7)
+    pygame.draw.circle(surface, (17, 28, 34), (rect.x + 30, rect.centery), 3)
 
-    pygame.draw.rect(surface, color, rect, border_radius=8)
-    pygame.draw.rect(surface, border, rect, 4, border_radius=8)
-
-    # little leaf decoration
-    pygame.draw.circle(surface, (60, 150, 75), (rect.x + 24, rect.y + rect.height // 2 + 4), 5)
-    pygame.draw.polygon(
-        surface,
-        (80, 175, 85),
-        [
-            (rect.x + 28, rect.y + rect.height // 2),
-            (rect.x + 42, rect.y + rect.height // 2 - 8),
-            (rect.x + 34, rect.y + rect.height // 2 + 6)
-        ]
-    )
-
-    label = FONT.render(text, True, (120, 65, 45))
+    label_color = LAVA_BLACK if selected else WHITE
+    label = FONT.render(text, True, label_color)
     surface.blit(label, (rect.centerx - label.get_width() // 2, rect.centery - label.get_height() // 2))
 
 
-def draw_start_menu_background(puffins):
+def draw_start_menu_background(puffins, title_logo=None):
     draw_sky_gradient(SCREEN)
     draw_pixel_sun(SCREEN)
     draw_dynamic_mountains(SCREEN)
@@ -1369,62 +1745,52 @@ def draw_start_menu_background(puffins):
 
     # soft overlay for readability
     overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-    overlay.fill((255, 255, 255, 18))
+    overlay.fill((255, 255, 255, 8))
     SCREEN.blit(overlay, (0, 0))
 
-    draw_wooden_title(SCREEN)
+    draw_wooden_title(SCREEN, title_logo)
 
 def start_menu():
     selected = 0
-    options = ["Start Game", "How to Play", "Quit"]
+    options = ["Story Mode (Single Player)", "Free Roam", "Travel Gallery", "How to Play", "Quit"]
     show_help = False
 
-    puffins = [Puffin() for _ in range(6)]
+    puffins = [Puffin() for _ in range(8)]
+    title_logo = load_title_logo()
 
-    button_width = 230
-    button_height = 68
-    start_y = 430
+    button_width = 310
+    button_height = 54
+    start_y = 355
 
     while True:
-        draw_start_menu_background(puffins)
+        draw_start_menu_background(puffins, title_logo)
 
         mouse_pos = pygame.mouse.get_pos()
 
         if show_help:
             panel = pygame.Rect(WIDTH // 2 - 390, 305, 780, 310)
-            pygame.draw.rect(SCREEN, (245, 210, 145), panel, border_radius=14)
-            pygame.draw.rect(SCREEN, (100, 60, 35), panel, 5, border_radius=14)
+            draw_glass_panel(panel, (229, 245, 248, 228), AURORA_CYAN, 8)
 
-            help_title = BIG_FONT.render("How to Play", True, (95, 55, 35))
+            help_title = BIG_FONT.render("How to Play", True, LAVA_BLACK)
             SCREEN.blit(help_title, (WIDTH // 2 - help_title.get_width() // 2, panel.y + 24))
 
             help_lines = [
                 "Goal: Drive around Iceland and visit all famous checkpoints.",
-                "Eat once per day, or you will lose life the next day.",
-                "Return home before 02:00, or your life will decrease.",
-                "Avoid speeding near cameras, or you will receive a fine.",
-                "Refuel at gas stations before the fuel runs out.",
-                "Stay close to the Ring Road to earn route bonus score."
+                "Manage €1000, fuel, vehicle stability, food, lodging and fines.",
+                "Refuel at gas stations for a fixed €40.",
+                "Rest & Accommodate costs €100 and advances to the next day.",
+                "Speed cameras deduct fines and record violations.",
+                "Complete every checkpoint to unlock the final trip settlement."
             ]
 
             y = panel.y + 80
             for line in help_lines:
-                txt = FONT.render(line, True, (80, 55, 40))
+                txt = FONT.render(line, True, LAVA_BLACK)
                 SCREEN.blit(txt, (panel.x + 55, y))
                 y += 34
 
             back_rect = pygame.Rect(WIDTH // 2 - 120, panel.y + 250, 240, 44)
-            pygame.draw.rect(SCREEN, (230, 170, 100), back_rect, border_radius=8)
-            pygame.draw.rect(SCREEN, (100, 60, 35), back_rect, 4, border_radius=8)
-
-            back_text = FONT.render("Back", True, (120, 65, 45))
-            SCREEN.blit(
-                back_text,
-                (
-                    back_rect.centerx - back_text.get_width() // 2,
-                    back_rect.centery - back_text.get_height() // 2
-                )
-            )
+            draw_menu_button(SCREEN, "Back", back_rect, True)
 
         else:
             button_rects = []
@@ -1432,7 +1798,7 @@ def start_menu():
             for i, opt in enumerate(options):
                 rect = pygame.Rect(
                     WIDTH // 2 - button_width // 2,
-                    start_y + i * 88,
+                    start_y + i * 66,
                     button_width,
                     button_height
                 )
@@ -1445,16 +1811,16 @@ def start_menu():
 
                 draw_menu_button(SCREEN, opt, rect, selected == i)
 
-            hint = FONT.render("Use mouse click or UP / DOWN and ENTER", True, WHITE)
+            hint = FONT.render("Use mouse click or UP / DOWN and ENTER", True, GLACIER_WHITE)
             SCREEN.blit(hint, (WIDTH // 2 - hint.get_width() // 2, HEIGHT - 55))
 
         # small animated caption
         t = pygame.time.get_ticks() * 0.004
-        caption_y = 265 + math.sin(t) * 4
+        caption_y = 286 + math.sin(t) * 4
         caption = FONT.render(
-            "A cozy pixel road trip across Iceland",
+            "Glacier roads, aurora nights, careful budgets",
             True,
-            (255, 245, 180)
+            GLACIER_WHITE
         )
         SCREEN.blit(caption, (WIDTH // 2 - caption.get_width() // 2, caption_y))
 
@@ -1474,11 +1840,11 @@ def start_menu():
                     else:
                         for i, rect in enumerate(button_rects):
                             if rect.collidepoint(mouse_pos):
-                                if i == 0:
+                                if i in [0, 1, 2]:
                                     return
-                                elif i == 1:
+                                elif i == 3:
                                     show_help = True
-                                elif i == 2:
+                                elif i == 4:
                                     pygame.quit()
                                     raise SystemExit
 
@@ -1495,11 +1861,11 @@ def start_menu():
                         selected = (selected + 1) % len(options)
 
                     elif event.key == pygame.K_RETURN:
-                        if selected == 0:
+                        if selected in [0, 1, 2]:
                             return
-                        elif selected == 1:
+                        elif selected == 3:
                             show_help = True
-                        elif selected == 2:
+                        elif selected == 4:
                             pygame.quit()
                             raise SystemExit
 
@@ -1542,6 +1908,14 @@ def check_gas_interaction(player, gas_stations):
             return
 
 
+def is_near_gas_station(player, gas_stations, radius=45):
+    for g in gas_stations:
+        g_pos = geo_to_screen(g["lat"], g["lon"])
+        if screen_distance((player.x, player.y), g_pos) < radius:
+            return True
+    return False
+
+
 def check_speed_camera(player, cameras, floating_texts):
     for i, cam in enumerate(cameras):
         cam_pos = geo_to_screen(cam["lat"], cam["lon"])
@@ -1558,6 +1932,17 @@ def check_speed_camera(player, cameras, floating_texts):
                 fine = min(350, 50 + (current_speed - limit) * 5)
                 player.money -= fine
                 player.score -= 80
+                player.total_fine_cost += fine
+                player.fine_count += 1
+                player.stability = max(0, player.stability - 5)
+                player.last_violation = {
+                    "speed": current_speed,
+                    "limit": limit,
+                    "fine": fine,
+                    "road": cam["name"],
+                    "count": player.fine_count
+                }
+                player.violation_timer = 210
                 player.show_message(f"Speeding fine! {current_speed} km/h in {limit} zone. -€{fine}")
                 floating_texts.append(FloatingText(f"-€{fine}", player.x, player.y - 40, RED))
                 player.camera_cooldown[i] = 260
@@ -1574,28 +1959,54 @@ def check_ring_road_bonus(player, floating_texts):
     if player.route_score_cooldown > 0:
         return
 
-    road_points = [geo_to_screen(cp["lat"], cp["lon"]) for cp in CHECKPOINTS]
     p = (player.x, player.y)
 
     min_dist = 99999
-    for i in range(len(road_points)):
-        a = road_points[i]
-        b = road_points[(i + 1) % len(road_points)]
+    nearest_route = None
+    for route, a, b in iter_route_segments():
         dist = point_to_segment_distance(p, a, b)
-        min_dist = min(min_dist, dist)
+        if dist < min_dist:
+            min_dist = dist
+            nearest_route = route
 
     if min_dist < 35 and abs(player.speed) > 1.5:
-        player.score += 10
+        bonus = 14 if nearest_route and nearest_route["kind"] == "highland" else 10
+        player.score += bonus
         player.route_score_cooldown = 90
-        floating_texts.append(FloatingText("+10 ROUTE", player.x, player.y - 25, YELLOW))
+        label = "+14 HIGHLAND" if bonus > 10 else "+10 ROUTE"
+        floating_texts.append(FloatingText(label, player.x, player.y - 25, YELLOW))
 
 
-def check_game_end(player):
+def draw_violation_alert(player):
+    if not player.last_violation or player.violation_timer <= 0:
+        return
+
+    alpha = min(230, 80 + player.violation_timer)
+    rect = pygame.Rect(WIDTH // 2 - 230, 94, 460, 132)
+    draw_glass_panel(rect, (42, 16, 22, alpha), WARNING_RED, 8)
+
+    v = player.last_violation
+    title = BIG_FONT.render("Speeding Penalty", True, WHITE)
+    SCREEN.blit(title, (rect.x + 24, rect.y + 18))
+    lines = [
+        f"{v['speed']} km/h in a {v['limit']} km/h zone",
+        f"Road section: {v['road']}",
+        f"Fine deducted: €{v['fine']}   Violations this trip: {v['count']}"
+    ]
+    for i, line in enumerate(lines):
+        txt = SMALL_FONT.render(line, True, GLACIER_WHITE)
+        SCREEN.blit(txt, (rect.x + 26, rect.y + 58 + i * 22))
+
+
+def check_game_end(player, gas_stations):
     if player.life <= 0:
         return "lose_life"
 
     if player.money <= 0:
         return "lose_money"
+
+    if player.fuel <= 0 and not is_near_gas_station(player, gas_stations):
+        return "lose_fuel"
 
     if all(cp["visited"] for cp in CHECKPOINTS):
         return "win"
@@ -1605,23 +2016,81 @@ def check_game_end(player):
 
 def show_end_screen(result, player):
     while True:
-        SCREEN.fill(BLACK)
+        draw_sky_gradient(SCREEN)
+        draw_dynamic_mountains(SCREEN)
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 12, 18, 105))
+        SCREEN.blit(overlay, (0, 0))
 
         if result == "win":
-            title = TITLE_FONT.render("YOU COMPLETED THE ICELAND ROAD TRIP!", True, GREEN)
-            subtitle = FONT.render(f"Final Score: {player.score}", True, WHITE)
+            title_text = "Ring Road Completed"
+            title_color = AURORA_CYAN
+            subtitle_text = "You completed every Iceland checkpoint."
         elif result == "lose_life":
-            title = TITLE_FONT.render("GAME OVER", True, RED)
-            subtitle = FONT.render("You lost all lives.", True, WHITE)
+            title_text = "Journey Failed"
+            title_color = WARNING_RED
+            subtitle_text = "You lost all lives."
+        elif result == "lose_fuel":
+            title_text = "Journey Failed"
+            title_color = WARNING_RED
+            subtitle_text = "You ran out of fuel away from a gas station."
         else:
-            title = TITLE_FONT.render("GAME OVER", True, RED)
-            subtitle = FONT.render("You ran out of money.", True, WHITE)
+            title_text = "Journey Failed"
+            title_color = WARNING_RED
+            subtitle_text = "You ran out of money."
 
-        SCREEN.blit(title, (WIDTH // 2 - title.get_width() // 2, 260))
-        SCREEN.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, 330))
+        panel = pygame.Rect(WIDTH // 2 - 360, 126, 720, 460)
+        draw_glass_panel(panel, (230, 245, 248, 226), title_color, 8)
 
-        hint = FONT.render("Press ESC to quit", True, GRAY)
-        SCREEN.blit(hint, (WIDTH // 2 - hint.get_width() // 2, 400))
+        title = TITLE_FONT.render(title_text, True, LAVA_BLACK)
+        subtitle = FONT.render(subtitle_text, True, DARK_GRAY)
+        SCREEN.blit(title, (WIDTH // 2 - title.get_width() // 2, panel.y + 34))
+        SCREEN.blit(subtitle, (WIDTH // 2 - subtitle.get_width() // 2, panel.y + 92))
+
+        visited = sum(1 for cp in CHECKPOINTS if cp["visited"])
+        completion = int(visited / len(CHECKPOINTS) * 100)
+        stats = [
+            ("Total distance", f"{player.total_km()} km"),
+            ("Trip time", f"{player.day} days"),
+            ("Total spend", f"€{player.total_spend()}"),
+            ("Refuel + lodging + fines", f"€{player.total_refuel_cost} + €{player.total_lodging_cost} + €{player.total_fine_cost}"),
+            ("Speeding violations", str(player.fine_count)),
+            ("Checkpoint completion", f"{completion}%"),
+            ("Remaining funds", f"€{player.money}"),
+            ("Final stability", f"{int(player.stability)}%"),
+        ]
+
+        x1 = panel.x + 70
+        y = panel.y + 145
+        for i, (label, value) in enumerate(stats):
+            col_x = x1 if i % 2 == 0 else panel.x + 390
+            row_y = y + (i // 2) * 64
+            label_surf = SMALL_FONT.render(label.upper(), True, DARK_GRAY)
+            value_surf = FONT.render(value, True, LAVA_BLACK)
+            SCREEN.blit(label_surf, (col_x, row_y))
+            SCREEN.blit(value_surf, (col_x, row_y + 22))
+
+        badges = []
+        if result == "win" and player.fine_count == 0:
+            badges.append("Perfect clean driving")
+        if player.refuel_count > 0:
+            badges.append("Planned fuel supply")
+        if player.fine_count > 0:
+            badges.append("Speed penalty record")
+        if player.lodging_count > 0:
+            badges.append("Rested traveler")
+
+        badge_x = panel.x + 70
+        for badge in badges[:3]:
+            badge_rect = pygame.Rect(badge_x, panel.y + 392, 180, 34)
+            pygame.draw.rect(SCREEN, (20, 36, 42), badge_rect, border_radius=6)
+            pygame.draw.rect(SCREEN, AURORA_CYAN, badge_rect, 1, border_radius=6)
+            txt = SMALL_FONT.render(badge, True, GLACIER_WHITE)
+            SCREEN.blit(txt, (badge_rect.centerx - txt.get_width() // 2, badge_rect.centery - txt.get_height() // 2))
+            badge_x += 196
+
+        hint = FONT.render("Press ESC to quit", True, GLACIER_WHITE)
+        SCREEN.blit(hint, (WIDTH // 2 - hint.get_width() // 2, 632))
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1677,13 +2146,19 @@ def main():
                 if event.key == pygame.K_f:
                     check_gas_interaction(player, gas_stations)
 
+                if event.key == pygame.K_h:
+                    lodging_popup(player)
+
+                if event.key == pygame.K_r:
+                    overnight_risk_mode(player)
+
         player.update(keys, weather)
 
         check_checkpoint_visit(player, floating_texts)
         check_speed_camera(player, cameras, floating_texts)
         check_ring_road_bonus(player, floating_texts)
 
-        result = check_game_end(player)
+        result = check_game_end(player, gas_stations)
         if result:
             show_end_screen(result, player)
 
@@ -1706,6 +2181,7 @@ def main():
         draw_minimap(player)
         draw_speedometer(player)
         draw_help_box()
+        draw_violation_alert(player)
         draw_floating_texts(floating_texts)
 
         pygame.display.flip()
